@@ -51,49 +51,63 @@ const parseDateRange = (range: string): DateRange => {
   }
 }
 
-// Fetch data using Yahoo Finance's public API
-const fetchYahooData = async (symbol: string, period1: string, period2: string) => {
-  const period1Timestamp = Math.floor(new Date(period1).getTime() / 1000)
-  const period2Timestamp = Math.floor(new Date(period2).getTime() / 1000)
-  
-  const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${period1Timestamp}&period2=${period2Timestamp}&interval=1d&events=history&includeAdjustedClose=true`
-  
+// Fetch data using Yahoo Finance's chart JSON endpoint (no crumb/cookies required)
+const fetchYahooChartData = async (symbol: string, period1: string, period2: string) => {
+  const p1 = Math.floor(new Date(period1).getTime() / 1000)
+  const p2 = Math.floor(new Date(period2).getTime() / 1000)
+  const encodedSymbol = encodeURIComponent(symbol)
+
+  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?period1=${p1}&period2=${p2}&interval=1d&events=history&includeAdjustedClose=true&lang=en-US&region=US`
+
   const response = await fetch(url, {
     headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      'Accept': 'application/json',
+      'User-Agent': 'Mozilla/5.0'
     }
   })
-  
+
   if (!response.ok) {
-    throw new Error(`Failed to fetch data for ${symbol}: ${response.status}`)
+    throw new Error(`Failed to fetch chart for ${symbol}: ${response.status}`)
   }
-  
-  const csvData = await response.text()
-  return parseCSV(csvData)
-}
 
-// Parse CSV data
-const parseCSV = (csvData: string) => {
-  const lines = csvData.trim().split('\n')
-  const header = lines[0].split(',')
-  
-  const data = lines.slice(1).map(line => {
-    const values = line.split(',')
-    const row: any = {}
-    header.forEach((col, index) => {
-      row[col] = values[index]
-    })
-    return row
-  }).filter(row => row.Date && row.Date !== 'null' && !isNaN(parseFloat(row.Close)))
+  const json = await response.json()
+  const result = json?.chart?.result?.[0]
+  if (!result) {
+    const errMsg = json?.chart?.error?.description || 'Unknown chart error'
+    throw new Error(`Yahoo chart error for ${symbol}: ${errMsg}`)
+  }
 
-  return data.map(row => ({
-    time: row.Date,
-    open: parseFloat(row.Open),
-    high: parseFloat(row.High),
-    low: parseFloat(row.Low),
-    close: parseFloat(row.Close),
-    volume: parseInt(row.Volume) || 0,
-  }))
+  const timestamps: number[] = result.timestamp || []
+  const quote = result.indicators?.quote?.[0]
+
+  if (!quote || timestamps.length === 0) {
+    throw new Error('No quote data returned')
+  }
+
+  const opens: Array<number | null> = quote.open || []
+  const highs: Array<number | null> = quote.high || []
+  const lows: Array<number | null> = quote.low || []
+  const closes: Array<number | null> = quote.close || []
+  const volumes: Array<number | null> = quote.volume || []
+
+  const data = timestamps.map((ts, i) => {
+    const o = opens[i]
+    const h = highs[i]
+    const l = lows[i]
+    const c = closes[i]
+    const v = volumes[i]
+    return {
+      time: new Date(ts * 1000).toISOString().split('T')[0],
+      open: typeof o === 'number' ? o : null,
+      high: typeof h === 'number' ? h : null,
+      low: typeof l === 'number' ? l : null,
+      close: typeof c === 'number' ? c : null,
+      volume: typeof v === 'number' ? v : 0,
+    }
+  })
+
+  // Filter out rows with missing close values
+  return data.filter(d => d.close !== null && d.open !== null && d.high !== null && d.low !== null)
 }
 
 // Calculate moving average
@@ -141,8 +155,8 @@ export default async function handler(
     const dateRange = parseDateRange(range as string)
     console.log('Parsed date range:', dateRange)
 
-    // Fetch historical data using Yahoo Finance CSV API
-    const chartData = await fetchYahooData(symbol, dateRange.start, dateRange.end)
+    // Fetch historical data using Yahoo Finance Chart JSON API
+    const chartData = await fetchYahooChartData(symbol, dateRange.start, dateRange.end)
     
     console.log(`Received ${chartData.length} data points`)
 
