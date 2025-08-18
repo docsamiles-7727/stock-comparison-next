@@ -34,6 +34,16 @@ const fetchStockData = async (symbol: string, range: string): Promise<StockData>
   return data
 }
 
+// Helper function to calculate standard deviation
+function calculateStandardDeviation(values: number[]): number {
+  const n = values.length
+  if (n < 2) return 0
+
+  const mean = values.reduce((acc, val) => acc + val, 0) / n
+  const variance = values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / (n - 1)
+  return Math.sqrt(variance)
+}
+
 export const useStockData = (
   ticker1: string,
   ticker2: string,
@@ -73,8 +83,8 @@ export const useStockData = (
   const dailyReturns1 = returns1.slice(1).map((v, i) => (v / returns1[i]) - 1)
   const dailyReturns2 = returns2.slice(1).map((v, i) => (v / returns2[i]) - 1)
   
-  const volatility1 = Math.sqrt(252) * Math.std(dailyReturns1) * 100
-  const volatility2 = Math.sqrt(252) * Math.std(dailyReturns2) * 100
+  const volatility1 = Math.sqrt(252) * calculateStandardDeviation(dailyReturns1) * 100
+  const volatility2 = Math.sqrt(252) * calculateStandardDeviation(dailyReturns2) * 100
   
   const correlation = calculateCorrelation(dailyReturns1, dailyReturns2)
   const beta = calculateBeta(dailyReturns1, dailyReturns2)
@@ -106,17 +116,16 @@ export const useStockData = (
 // Helper functions
 function calculateCorrelation(x: number[], y: number[]): number {
   const n = x.length
+  if (n < 2) return 0
+
   const mean_x = x.reduce((a, b) => a + b) / n
   const mean_y = y.reduce((a, b) => a + b) / n
   
   const cov = x.reduce((acc, _, i) => 
     acc + (x[i] - mean_x) * (y[i] - mean_y), 0) / (n - 1)
   
-  const std_x = Math.sqrt(x.reduce((acc, val) => 
-    acc + Math.pow(val - mean_x, 2), 0) / (n - 1))
-  
-  const std_y = Math.sqrt(y.reduce((acc, val) => 
-    acc + Math.pow(val - mean_y, 2), 0) / (n - 1))
+  const std_x = calculateStandardDeviation(x)
+  const std_y = calculateStandardDeviation(y)
   
   return cov / (std_x * std_y)
 }
@@ -129,6 +138,8 @@ function calculateBeta(market: number[], stock: number[]): number {
 
 function calculateCovariance(x: number[], y: number[]): number {
   const n = x.length
+  if (n < 2) return 0
+
   const mean_x = x.reduce((a, b) => a + b) / n
   const mean_y = y.reduce((a, b) => a + b) / n
   return x.reduce((acc, _, i) => 
@@ -137,6 +148,8 @@ function calculateCovariance(x: number[], y: number[]): number {
 
 function calculateVariance(x: number[]): number {
   const n = x.length
+  if (n < 2) return 0
+
   const mean = x.reduce((a, b) => a + b) / n
   return x.reduce((acc, val) => 
     acc + Math.pow(val - mean, 2), 0) / (n - 1)
