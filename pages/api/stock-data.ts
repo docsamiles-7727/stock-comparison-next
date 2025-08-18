@@ -63,18 +63,14 @@ export default async function handler(
     
     const dateRange = parseDateRange(range as string)
     console.log('Parsed date range:', dateRange)
-    
-    // Create a query options object that matches the library's expectations
-    const queryOptions = {
-      symbol: symbol,
+
+    // Fetch historical data with correct parameters
+    const result = await yahooFinance.historical(symbol, {
       period1: new Date(dateRange.start),
       period2: new Date(dateRange.end),
       interval: '1d',
-    }
-    console.log('Query options:', queryOptions)
-
-    // Fetch historical data
-    const result = await yahooFinance.historical(queryOptions)
+    })
+    
     console.log(`Received ${result.length} data points`)
 
     if (!result || result.length === 0) {
