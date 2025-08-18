@@ -1,6 +1,4 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import yahooFinance from 'yahoo-finance2'
-import { startOfDay, subYears, subMonths, parseISO } from 'date-fns'
 
 type DateRange = {
   start: string
@@ -8,31 +6,110 @@ type DateRange = {
 }
 
 const parseDateRange = (range: string): DateRange => {
-  const now = startOfDay(new Date())
+  const now = new Date()
   
   switch (range) {
     case '1m':
-      return { start: subMonths(now, 1).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     case '3m':
-      return { start: subMonths(now, 3).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     case '6m':
-      return { start: subMonths(now, 6).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     case '1y':
-      return { start: subYears(now, 1).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     case '3y':
-      return { start: subYears(now, 3).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 3 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     case '5y':
-      return { start: subYears(now, 5).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 5 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     default:
       if (range.includes('|')) {
         const [start, end] = range.split('|')
-        return {
-          start: parseISO(start).toISOString(),
-          end: parseISO(end).toISOString(),
-        }
+        return { start, end }
       }
-      return { start: subYears(now, 1).toISOString(), end: now.toISOString() }
+      return { 
+        start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
   }
+}
+
+// Fetch data using Yahoo Finance's public API
+const fetchYahooData = async (symbol: string, period1: string, period2: string) => {
+  const period1Timestamp = Math.floor(new Date(period1).getTime() / 1000)
+  const period2Timestamp = Math.floor(new Date(period2).getTime() / 1000)
+  
+  const url = `https://query1.finance.yahoo.com/v7/finance/download/${symbol}?period1=${period1Timestamp}&period2=${period2Timestamp}&interval=1d&events=history&includeAdjustedClose=true`
+  
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+    }
+  })
+  
+  if (!response.ok) {
+    throw new Error(`Failed to fetch data for ${symbol}: ${response.status}`)
+  }
+  
+  const csvData = await response.text()
+  return parseCSV(csvData)
+}
+
+// Parse CSV data
+const parseCSV = (csvData: string) => {
+  const lines = csvData.trim().split('\n')
+  const header = lines[0].split(',')
+  
+  const data = lines.slice(1).map(line => {
+    const values = line.split(',')
+    const row: any = {}
+    header.forEach((col, index) => {
+      row[col] = values[index]
+    })
+    return row
+  }).filter(row => row.Date && row.Date !== 'null' && !isNaN(parseFloat(row.Close)))
+
+  return data.map(row => ({
+    time: row.Date,
+    open: parseFloat(row.Open),
+    high: parseFloat(row.High),
+    low: parseFloat(row.Low),
+    close: parseFloat(row.Close),
+    volume: parseInt(row.Volume) || 0,
+  }))
+}
+
+// Calculate moving average
+const calculateMA = (data: any[], period: number) => {
+  const result = []
+  for (let i = period - 1; i < data.length; i++) {
+    const sum = data
+      .slice(i - period + 1, i + 1)
+      .reduce((acc, val) => acc + val.close, 0)
+    
+    result.push({
+      time: data[i].time,
+      value: sum / period,
+    })
+  }
+  return result
 }
 
 export default async function handler(
@@ -64,43 +141,19 @@ export default async function handler(
     const dateRange = parseDateRange(range as string)
     console.log('Parsed date range:', dateRange)
 
-    // Fetch historical data with correct parameters
-    const result = await yahooFinance.historical(symbol, {
-      period1: new Date(dateRange.start),
-      period2: new Date(dateRange.end),
-      interval: '1d',
-    })
+    // Fetch historical data using Yahoo Finance CSV API
+    const chartData = await fetchYahooData(symbol, dateRange.start, dateRange.end)
     
-    console.log(`Received ${result.length} data points`)
+    console.log(`Received ${chartData.length} data points`)
 
-    if (!result || result.length === 0) {
+    if (!chartData || chartData.length === 0) {
       console.log('No data received from Yahoo Finance')
       return res.status(404).json({ message: 'No data found for the specified symbol and date range' })
     }
 
-    // Transform data for the chart
-    const chartData = result.map(quote => ({
-      time: quote.date.toISOString().split('T')[0],
-      open: quote.open,
-      high: quote.high,
-      low: quote.low,
-      close: quote.close,
-      volume: quote.volume,
-    }))
-
-    // Basic data validation
-    const hasInvalidData = chartData.some(data => 
-      !data.open || !data.high || !data.low || !data.close || !data.volume
-    )
-
-    if (hasInvalidData) {
-      console.log('Invalid data detected in response')
-      return res.status(500).json({ message: 'Invalid data received from Yahoo Finance' })
-    }
-
     // Calculate technical indicators
-    const ma50 = calculateMA(chartData, 50)
-    const ma200 = calculateMA(chartData, 200)
+    const ma50 = calculateMA(chartData, Math.min(50, chartData.length))
+    const ma200 = calculateMA(chartData, Math.min(200, chartData.length))
 
     const response = {
       symbol,
@@ -132,20 +185,4 @@ export default async function handler(
     
     res.status(500).json(errorResponse)
   }
-}
-
-// Helper function to calculate Moving Average
-function calculateMA(data: any[], period: number) {
-  const result = []
-  for (let i = period - 1; i < data.length; i++) {
-    const sum = data
-      .slice(i - period + 1, i + 1)
-      .reduce((acc, val) => acc + val.close, 0)
-    
-    result.push({
-      time: data[i].time,
-      value: sum / period,
-    })
-  }
-  return result
 }
