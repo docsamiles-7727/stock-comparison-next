@@ -2,12 +2,35 @@ import { useQuery } from 'react-query'
 import axios from 'axios'
 
 interface StockData {
-  ohlc: any[]
-  ma50: any[]
-  ma200: any[]
-  bollingerUpper: any[]
-  bollingerLower: any[]
-  volume: any[]
+  symbol: string
+  timeframe: {
+    start: string
+    end: string
+  }
+  dataPoints: number
+  data: {
+    ohlc: Array<{
+      time: string
+      open: number
+      high: number
+      low: number
+      close: number
+      volume: number
+    }>
+    ma50: Array<{
+      time: string
+      value: number
+    }>
+    ma200: Array<{
+      time: string
+      value: number
+    }>
+    volume: Array<{
+      time: string
+      value: number
+      color: string
+    }>
+  }
 }
 
 interface UseStockDataResult {
@@ -30,18 +53,27 @@ interface UseStockDataResult {
 }
 
 const fetchStockData = async (symbol: string, range: string): Promise<StockData> => {
-  const { data } = await axios.get(`/api/stock-data?symbol=${symbol}&range=${range}`)
-  return data
-}
-
-// Helper function to calculate standard deviation
-function calculateStandardDeviation(values: number[]): number {
-  const n = values.length
-  if (n < 2) return 0
-
-  const mean = values.reduce((acc, val) => acc + val, 0) / n
-  const variance = values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / (n - 1)
-  return Math.sqrt(variance)
+  try {
+    const { data } = await axios.get(`/api/stock-data?symbol=${symbol}&range=${range}`, {
+      timeout: 10000, // 10 second timeout
+    })
+    return data
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        // that falls out of the range of 2xx
+        throw new Error(error.response.data.message || `Failed to fetch data for ${symbol}`)
+      } else if (error.request) {
+        // The request was made but no response was received
+        throw new Error('No response received from server')
+      } else {
+        // Something happened in setting up the request
+        throw new Error(`Error setting up request: ${error.message}`)
+      }
+    }
+    throw new Error('An unexpected error occurred')
+  }
 }
 
 export const useStockData = (
@@ -49,33 +81,49 @@ export const useStockData = (
   ticker2: string,
   dateRange: { start: string; end: string }
 ): UseStockDataResult => {
-  const { data: data1, isLoading: isLoading1 } = useQuery(
+  const { data: data1, isLoading: isLoading1, error: error1 } = useQuery(
     ['stockData', ticker1, dateRange],
     () => fetchStockData(ticker1, `${dateRange.start}|${dateRange.end}`),
-    { enabled: !!ticker1 }
+    {
+      retry: 2,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+      enabled: Boolean(ticker1),
+    }
   )
 
-  const { data: data2, isLoading: isLoading2 } = useQuery(
+  const { data: data2, isLoading: isLoading2, error: error2 } = useQuery(
     ['stockData', ticker2, dateRange],
     () => fetchStockData(ticker2, `${dateRange.start}|${dateRange.end}`),
-    { enabled: !!ticker2 }
+    {
+      retry: 2,
+      retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 10000),
+      enabled: Boolean(ticker2),
+    }
   )
 
   if (isLoading1 || isLoading2) {
     return { data: null, isLoading: true, error: null }
   }
 
-  if (!data1 || !data2) {
+  if (error1 || error2) {
     return { 
       data: null, 
       isLoading: false, 
-      error: new Error('Failed to fetch data') 
+      error: new Error(error1?.message || error2?.message || 'Failed to fetch data') 
+    }
+  }
+
+  if (!data1?.data || !data2?.data) {
+    return { 
+      data: null, 
+      isLoading: false, 
+      error: new Error('No data available') 
     }
   }
 
   // Calculate metrics
-  const returns1 = data1.ohlc.map(d => d.close)
-  const returns2 = data2.ohlc.map(d => d.close)
+  const returns1 = data1.data.ohlc.map(d => d.close)
+  const returns2 = data2.data.ohlc.map(d => d.close)
   
   const totalReturn1 = ((returns1[returns1.length - 1] / returns1[0]) - 1) * 100
   const totalReturn2 = ((returns2[returns2.length - 1] / returns2[0]) - 1) * 100
@@ -114,6 +162,15 @@ export const useStockData = (
 }
 
 // Helper functions
+function calculateStandardDeviation(values: number[]): number {
+  const n = values.length
+  if (n < 2) return 0
+
+  const mean = values.reduce((acc, val) => acc + val, 0) / n
+  const variance = values.reduce((acc, val) => acc + Math.pow(val - mean, 2), 0) / (n - 1)
+  return Math.sqrt(variance)
+}
+
 function calculateCorrelation(x: number[], y: number[]): number {
   const n = x.length
   if (n < 2) return 0
@@ -133,7 +190,7 @@ function calculateCorrelation(x: number[], y: number[]): number {
 function calculateBeta(market: number[], stock: number[]): number {
   const covariance = calculateCovariance(market, stock)
   const variance = calculateVariance(market)
-  return covariance / variance
+  return variance === 0 ? 0 : covariance / variance
 }
 
 function calculateCovariance(x: number[], y: number[]): number {

@@ -35,45 +35,19 @@ const parseDateRange = (range: string): DateRange => {
   }
 }
 
-const calculateMA = (data: any[], period: number) => {
-  const result = []
-  for (let i = period - 1; i < data.length; i++) {
-    const sum = data.slice(i - period + 1, i + 1).reduce((acc, val) => acc + val.close, 0)
-    result.push({
-      time: data[i].time,
-      value: sum / period,
-    })
-  }
-  return result
-}
-
-const calculateBollingerBands = (data: any[], period: number, stdDev: number = 2) => {
-  const upper = []
-  const lower = []
-  
-  for (let i = period - 1; i < data.length; i++) {
-    const slice = data.slice(i - period + 1, i + 1)
-    const ma = slice.reduce((acc, val) => acc + val.close, 0) / period
-    const variance = slice.reduce((acc, val) => acc + Math.pow(val.close - ma, 2), 0) / period
-    const std = Math.sqrt(variance)
-    
-    upper.push({
-      time: data[i].time,
-      value: ma + (stdDev * std),
-    })
-    lower.push({
-      time: data[i].time,
-      value: ma - (stdDev * std),
-    })
-  }
-  
-  return { upper, lower }
-}
-
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  // Enable CORS
+  res.setHeader('Access-Control-Allow-Origin', '*')
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end()
+  }
+
   if (req.method !== 'GET') {
     return res.status(405).json({ message: 'Method not allowed' })
   }
@@ -85,18 +59,29 @@ export default async function handler(
   }
 
   try {
+    console.log(`Fetching data for symbol: ${symbol}, range: ${range}`)
+    
     const dateRange = parseDateRange(range as string)
+    console.log('Parsed date range:', dateRange)
     
     // Create a query options object that matches the library's expectations
     const queryOptions = {
-      period1: dateRange.start,  // ISO string is accepted
-      period2: dateRange.end,    // ISO string is accepted
-      interval: '1d' as const    // Type assertion to match expected literal type
+      symbol: symbol,
+      period1: new Date(dateRange.start),
+      period2: new Date(dateRange.end),
+      interval: '1d',
     }
+    console.log('Query options:', queryOptions)
 
     // Fetch historical data
-    const result = await yahooFinance.historical(symbol, queryOptions)
-    
+    const result = await yahooFinance.historical(queryOptions)
+    console.log(`Received ${result.length} data points`)
+
+    if (!result || result.length === 0) {
+      console.log('No data received from Yahoo Finance')
+      return res.status(404).json({ message: 'No data found for the specified symbol and date range' })
+    }
+
     // Transform data for the chart
     const chartData = result.map(quote => ({
       time: quote.date.toISOString().split('T')[0],
@@ -107,25 +92,64 @@ export default async function handler(
       volume: quote.volume,
     }))
 
+    // Basic data validation
+    const hasInvalidData = chartData.some(data => 
+      !data.open || !data.high || !data.low || !data.close || !data.volume
+    )
+
+    if (hasInvalidData) {
+      console.log('Invalid data detected in response')
+      return res.status(500).json({ message: 'Invalid data received from Yahoo Finance' })
+    }
+
     // Calculate technical indicators
     const ma50 = calculateMA(chartData, 50)
     const ma200 = calculateMA(chartData, 200)
-    const bollinger = calculateBollingerBands(chartData, 20)
 
-    res.status(200).json({
-      ohlc: chartData,
-      ma50,
-      ma200,
-      bollingerUpper: bollinger.upper,
-      bollingerLower: bollinger.lower,
-      volume: chartData.map(d => ({
-        time: d.time,
-        value: d.volume,
-        color: d.close >= d.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
-      })),
-    })
+    const response = {
+      symbol,
+      timeframe: { start: dateRange.start, end: dateRange.end },
+      dataPoints: chartData.length,
+      data: {
+        ohlc: chartData,
+        ma50,
+        ma200,
+        volume: chartData.map(d => ({
+          time: d.time,
+          value: d.volume,
+          color: d.close >= d.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
+        })),
+      }
+    }
+
+    res.status(200).json(response)
   } catch (error) {
-    console.error('Error fetching stock data:', error)
-    res.status(500).json({ message: 'Error fetching stock data' })
+    console.error('Error in stock-data API:', error)
+    
+    // Detailed error response
+    const errorResponse = {
+      message: 'Error fetching stock data',
+      details: error instanceof Error ? error.message : 'Unknown error',
+      symbol,
+      range,
+    }
+    
+    res.status(500).json(errorResponse)
   }
+}
+
+// Helper function to calculate Moving Average
+function calculateMA(data: any[], period: number) {
+  const result = []
+  for (let i = period - 1; i < data.length; i++) {
+    const sum = data
+      .slice(i - period + 1, i + 1)
+      .reduce((acc, val) => acc + val.close, 0)
+    
+    result.push({
+      time: data[i].time,
+      value: sum / period,
+    })
+  }
+  return result
 }
