@@ -1,4 +1,4 @@
-import { useQuery, UseQueryResult } from 'react-query'
+import { useQuery } from 'react-query'
 import axios, { AxiosError } from 'axios'
 
 interface StockData {
@@ -52,7 +52,13 @@ interface UseStockDataResult {
   error: Error | null
 }
 
-type QueryError = Error | AxiosError | null;
+const getErrorMessage = (error: unknown): string => {
+  if (error instanceof Error) return error.message
+  if (axios.isAxiosError(error) && error.response?.data?.message) {
+    return error.response.data.message
+  }
+  return 'An unexpected error occurred'
+}
 
 const fetchStockData = async (symbol: string, range: string): Promise<StockData> => {
   try {
@@ -61,16 +67,7 @@ const fetchStockData = async (symbol: string, range: string): Promise<StockData>
     })
     return data
   } catch (error) {
-    if (axios.isAxiosError(error)) {
-      if (error.response) {
-        throw new Error(error.response.data.message || `Failed to fetch data for ${symbol}`)
-      } else if (error.request) {
-        throw new Error('No response received from server')
-      } else {
-        throw new Error(`Error setting up request: ${error.message}`)
-      }
-    }
-    throw new Error('An unexpected error occurred')
+    throw new Error(getErrorMessage(error))
   }
 }
 
@@ -79,7 +76,7 @@ export const useStockData = (
   ticker2: string,
   dateRange: { start: string; end: string }
 ): UseStockDataResult => {
-  const query1: UseQueryResult<StockData, QueryError> = useQuery(
+  const { data: data1, isLoading: isLoading1, error: error1 } = useQuery<StockData, Error>(
     ['stockData', ticker1, dateRange],
     () => fetchStockData(ticker1, `${dateRange.start}|${dateRange.end}`),
     {
@@ -89,7 +86,7 @@ export const useStockData = (
     }
   )
 
-  const query2: UseQueryResult<StockData, QueryError> = useQuery(
+  const { data: data2, isLoading: isLoading2, error: error2 } = useQuery<StockData, Error>(
     ['stockData', ticker2, dateRange],
     () => fetchStockData(ticker2, `${dateRange.start}|${dateRange.end}`),
     {
@@ -99,20 +96,19 @@ export const useStockData = (
     }
   )
 
-  if (query1.isLoading || query2.isLoading) {
+  if (isLoading1 || isLoading2) {
     return { data: null, isLoading: true, error: null }
   }
 
-  if (query1.error || query2.error) {
-    const errorMessage = (query1.error || query2.error)?.toString() || 'Failed to fetch data'
+  if (error1 || error2) {
     return { 
       data: null, 
       isLoading: false, 
-      error: new Error(errorMessage)
+      error: new Error(getErrorMessage(error1 || error2))
     }
   }
 
-  if (!query1.data?.data || !query2.data?.data) {
+  if (!data1?.data || !data2?.data) {
     return { 
       data: null, 
       isLoading: false, 
@@ -121,8 +117,8 @@ export const useStockData = (
   }
 
   // Calculate metrics
-  const returns1 = query1.data.data.ohlc.map(d => d.close)
-  const returns2 = query2.data.data.ohlc.map(d => d.close)
+  const returns1 = data1.data.ohlc.map(d => d.close)
+  const returns2 = data2.data.ohlc.map(d => d.close)
   
   const totalReturn1 = ((returns1[returns1.length - 1] / returns1[0]) - 1) * 100
   const totalReturn2 = ((returns2[returns2.length - 1] / returns2[0]) - 1) * 100
