@@ -52,7 +52,29 @@ const parseDateRange = (range: string): DateRange => {
 }
 
 // Fetch data using Yahoo Finance's chart JSON endpoint (no crumb/cookies required)
-const fetchYahooChartData = async (symbol: string, period1: string, period2: string) => {
+type RawPoint = {
+  time: string
+  open: number | null
+  high: number | null
+  low: number | null
+  close: number | null
+  volume: number
+}
+
+type Point = {
+  time: string
+  open: number
+  high: number
+  low: number
+  close: number
+  volume: number
+}
+
+function isCompletePoint(p: RawPoint): p is Point {
+  return p.open !== null && p.high !== null && p.low !== null && p.close !== null
+}
+
+const fetchYahooChartData = async (symbol: string, period1: string, period2: string): Promise<Point[]> => {
   const p1 = Math.floor(new Date(period1).getTime() / 1000)
   const p2 = Math.floor(new Date(period2).getTime() / 1000)
   const encodedSymbol = encodeURIComponent(symbol)
@@ -90,7 +112,7 @@ const fetchYahooChartData = async (symbol: string, period1: string, period2: str
   const closes: Array<number | null> = quote.close || []
   const volumes: Array<number | null> = quote.volume || []
 
-  const data = timestamps.map((ts, i) => {
+  const data: RawPoint[] = timestamps.map((ts, i) => {
     const o = opens[i]
     const h = highs[i]
     const l = lows[i]
@@ -107,7 +129,7 @@ const fetchYahooChartData = async (symbol: string, period1: string, period2: str
   })
 
   // Filter out rows with missing close values
-  return data.filter(d => d.close !== null && d.open !== null && d.high !== null && d.low !== null)
+  return data.filter(isCompletePoint)
 }
 
 // Calculate moving average
