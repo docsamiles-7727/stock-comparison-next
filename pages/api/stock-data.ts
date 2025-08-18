@@ -1,4 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
+import yahooFinance from 'yahoo-finance2'
 
 type DateRange = {
   start: string
@@ -74,61 +75,21 @@ function isCompletePoint(p: RawPoint): p is Point {
   return p.open !== null && p.high !== null && p.low !== null && p.close !== null
 }
 
-const fetchYahooChartData = async (symbol: string, period1: string, period2: string): Promise<Point[]> => {
-  const p1 = Math.floor(new Date(period1).getTime() / 1000)
-  const p2 = Math.floor(new Date(period2).getTime() / 1000)
-  const encodedSymbol = encodeURIComponent(symbol)
-
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodedSymbol}?period1=${p1}&period2=${p2}&interval=1d&events=history&includeAdjustedClose=true&lang=en-US&region=US`
-
-  const response = await fetch(url, {
-    headers: {
-      'Accept': 'application/json',
-      'User-Agent': 'Mozilla/5.0'
-    }
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to fetch chart for ${symbol}: ${response.status}`)
+const fetchYahooHistorical = async (symbol: string, start: string, end: string): Promise<Point[]> => {
+  const options: yahooFinance.HistoricalOptions = {
+    period1: new Date(start),
+    period2: new Date(end),
+    interval: '1d'
   }
-
-  const json = await response.json()
-  const result = json?.chart?.result?.[0]
-  if (!result) {
-    const errMsg = json?.chart?.error?.description || 'Unknown chart error'
-    throw new Error(`Yahoo chart error for ${symbol}: ${errMsg}`)
-  }
-
-  const timestamps: number[] = result.timestamp || []
-  const quote = result.indicators?.quote?.[0]
-
-  if (!quote || timestamps.length === 0) {
-    throw new Error('No quote data returned')
-  }
-
-  const opens: Array<number | null> = quote.open || []
-  const highs: Array<number | null> = quote.high || []
-  const lows: Array<number | null> = quote.low || []
-  const closes: Array<number | null> = quote.close || []
-  const volumes: Array<number | null> = quote.volume || []
-
-  const data: RawPoint[] = timestamps.map((ts, i) => {
-    const o = opens[i]
-    const h = highs[i]
-    const l = lows[i]
-    const c = closes[i]
-    const v = volumes[i]
-    return {
-      time: new Date(ts * 1000).toISOString().split('T')[0],
-      open: typeof o === 'number' ? o : null,
-      high: typeof h === 'number' ? h : null,
-      low: typeof l === 'number' ? l : null,
-      close: typeof c === 'number' ? c : null,
-      volume: typeof v === 'number' ? v : 0,
-    }
-  })
-
-  // Filter out rows with missing close values
+  const rows = await yahooFinance.historical(symbol, options)
+  const data: RawPoint[] = rows.map(r => ({
+    time: r.date.toISOString().split('T')[0],
+    open: typeof r.open === 'number' ? r.open : null,
+    high: typeof r.high === 'number' ? r.high : null,
+    low: typeof r.low === 'number' ? r.low : null,
+    close: typeof r.close === 'number' ? r.close : null,
+    volume: typeof r.volume === 'number' ? r.volume : 0,
+  }))
   return data.filter(isCompletePoint)
 }
 
@@ -177,8 +138,8 @@ export default async function handler(
     const dateRange = parseDateRange(range as string)
     console.log('Parsed date range:', dateRange)
 
-    // Fetch historical data using Yahoo Finance Chart JSON API
-    const chartData = await fetchYahooChartData(symbol, dateRange.start, dateRange.end)
+    // Fetch historical data using yahoo-finance2 (Node client)
+    const chartData = await fetchYahooHistorical(symbol, dateRange.start, dateRange.end)
     
     console.log(`Received ${chartData.length} data points`)
 
