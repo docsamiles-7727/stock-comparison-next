@@ -1,5 +1,5 @@
 import { useQuery } from 'react-query'
-import axios from 'axios'
+import axios, { AxiosError } from 'axios'
 
 interface StockData {
   symbol: string
@@ -61,14 +61,10 @@ const fetchStockData = async (symbol: string, range: string): Promise<StockData>
   } catch (error) {
     if (axios.isAxiosError(error)) {
       if (error.response) {
-        // The request was made and the server responded with a status code
-        // that falls out of the range of 2xx
         throw new Error(error.response.data.message || `Failed to fetch data for ${symbol}`)
       } else if (error.request) {
-        // The request was made but no response was received
         throw new Error('No response received from server')
       } else {
-        // Something happened in setting up the request
         throw new Error(`Error setting up request: ${error.message}`)
       }
     }
@@ -81,7 +77,7 @@ export const useStockData = (
   ticker2: string,
   dateRange: { start: string; end: string }
 ): UseStockDataResult => {
-  const { data: data1, isLoading: isLoading1, error: error1 } = useQuery(
+  const { data: data1, isLoading: isLoading1, error: error1 } = useQuery<StockData, Error>(
     ['stockData', ticker1, dateRange],
     () => fetchStockData(ticker1, `${dateRange.start}|${dateRange.end}`),
     {
@@ -91,7 +87,7 @@ export const useStockData = (
     }
   )
 
-  const { data: data2, isLoading: isLoading2, error: error2 } = useQuery(
+  const { data: data2, isLoading: isLoading2, error: error2 } = useQuery<StockData, Error>(
     ['stockData', ticker2, dateRange],
     () => fetchStockData(ticker2, `${dateRange.start}|${dateRange.end}`),
     {
@@ -106,10 +102,11 @@ export const useStockData = (
   }
 
   if (error1 || error2) {
+    const errorMessage = error1?.message || error2?.message || 'Failed to fetch data'
     return { 
       data: null, 
       isLoading: false, 
-      error: new Error(error1?.message || error2?.message || 'Failed to fetch data') 
+      error: new Error(errorMessage)
     }
   }
 
