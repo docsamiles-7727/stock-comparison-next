@@ -80,19 +80,22 @@ export default async function handler(
 
   const { symbol, range } = req.query
   
-  if (!symbol) {
+  if (!symbol || typeof symbol !== 'string') {
     return res.status(400).json({ message: 'Symbol is required' })
   }
 
   try {
     const dateRange = parseDateRange(range as string)
+    
+    // Create a query options object that matches the library's expectations
     const queryOptions = {
-      period1: new Date(dateRange.start),
-      period2: new Date(dateRange.end),
-      interval: '1d',
+      period1: dateRange.start,  // ISO string is accepted
+      period2: dateRange.end,    // ISO string is accepted
+      interval: '1d' as const    // Type assertion to match expected literal type
     }
 
-    const result = await yahooFinance.historical(symbol as string, queryOptions)
+    // Fetch historical data
+    const result = await yahooFinance.historical(symbol, queryOptions)
     
     // Transform data for the chart
     const chartData = result.map(quote => ({
@@ -118,7 +121,7 @@ export default async function handler(
       volume: chartData.map(d => ({
         time: d.time,
         value: d.volume,
-        color: d.close > d.open ? '#26a69a50' : '#ef535050',
+        color: d.close >= d.open ? 'rgba(38, 166, 154, 0.5)' : 'rgba(239, 83, 80, 0.5)',
       })),
     })
   } catch (error) {
