@@ -52,7 +52,6 @@ const parseDateRange = (range: string): DateRange => {
   }
 }
 
-// Fetch data using Yahoo Finance's chart JSON endpoint (no crumb/cookies required)
 type RawPoint = {
   time: string
   open: number | null
@@ -75,26 +74,8 @@ function isCompletePoint(p: RawPoint): p is Point {
   return p.open !== null && p.high !== null && p.low !== null && p.close !== null
 }
 
-const fetchYahooHistorical = async (symbol: string, start: string, end: string): Promise<Point[]> => {
-  const options: HistoricalOptions = {
-    period1: new Date(start),
-    period2: new Date(end),
-    interval: '1d'
-  }
-  const rows = await yahooFinance.historical(symbol, options)
-  const data: RawPoint[] = rows.map(r => ({
-    time: r.date.toISOString().split('T')[0],
-    open: typeof r.open === 'number' ? r.open : null,
-    high: typeof r.high === 'number' ? r.high : null,
-    low: typeof r.low === 'number' ? r.low : null,
-    close: typeof r.close === 'number' ? r.close : null,
-    volume: typeof r.volume === 'number' ? r.volume : 0,
-  }))
-  return data.filter(isCompletePoint)
-}
-
 // Calculate moving average
-const calculateMA = (data: any[], period: number) => {
+const calculateMA = (data: Point[], period: number) => {
   const result = []
   for (let i = period - 1; i < data.length; i++) {
     const sum = data
@@ -133,19 +114,52 @@ export default async function handler(
   }
 
   try {
-    console.log(`Fetching data for symbol: ${symbol}, range: ${range}`)
+    console.log(`[API] Fetching data for symbol: ${symbol}, range: ${range}`)
     
     const dateRange = parseDateRange(range as string)
-    console.log('Parsed date range:', dateRange)
+    console.log(`[API] Parsed date range:`, dateRange)
 
-    // Fetch historical data using yahoo-finance2 (Node client)
-    const chartData = await fetchYahooHistorical(symbol, dateRange.start, dateRange.end)
-    
-    console.log(`Received ${chartData.length} data points`)
+    // Use yahoo-finance2 with simpler configuration
+    const queryOptions: HistoricalOptions = {
+      period1: new Date(dateRange.start),
+      period2: new Date(dateRange.end),
+      interval: '1d'
+    }
 
-    if (!chartData || chartData.length === 0) {
-      console.log('No data received from Yahoo Finance')
-      return res.status(404).json({ message: 'No data found for the specified symbol and date range' })
+    console.log(`[API] Yahoo Finance options:`, queryOptions)
+
+    const historicalData = await yahooFinance.historical(symbol, queryOptions)
+    console.log(`[API] Raw data received: ${historicalData.length} rows`)
+
+    if (!historicalData || historicalData.length === 0) {
+      console.log(`[API] No data received from Yahoo Finance for ${symbol}`)
+      return res.status(404).json({ 
+        message: `No data found for symbol ${symbol}`,
+        symbol,
+        dateRange 
+      })
+    }
+
+    // Transform and filter data
+    const rawData: RawPoint[] = historicalData.map(row => ({
+      time: row.date.toISOString().split('T')[0],
+      open: typeof row.open === 'number' ? row.open : null,
+      high: typeof row.high === 'number' ? row.high : null,
+      low: typeof row.low === 'number' ? row.low : null,
+      close: typeof row.close === 'number' ? row.close : null,
+      volume: typeof row.volume === 'number' ? row.volume : 0,
+    }))
+
+    const chartData = rawData.filter(isCompletePoint)
+    console.log(`[API] Filtered to ${chartData.length} complete data points`)
+
+    if (chartData.length === 0) {
+      return res.status(404).json({ 
+        message: `No valid OHLC data for symbol ${symbol}`,
+        symbol,
+        dateRange,
+        rawDataLength: rawData.length 
+      })
     }
 
     // Calculate technical indicators
@@ -168,16 +182,18 @@ export default async function handler(
       }
     }
 
+    console.log(`[API] Sending response with ${response.dataPoints} data points`)
     res.status(200).json(response)
+
   } catch (error) {
-    console.error('Error in stock-data API:', error)
+    console.error(`[API] Error fetching data for ${symbol}:`, error)
     
-    // Detailed error response
     const errorResponse = {
       message: 'Error fetching stock data',
       details: error instanceof Error ? error.message : 'Unknown error',
       symbol,
       range,
+      stack: error instanceof Error ? error.stack : undefined
     }
     
     res.status(500).json(errorResponse)
