@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import yahooFinance, { type HistoricalOptions } from 'yahoo-finance2'
+import yahooFinance from 'yahoo-finance2'
 
 type DateRange = {
   start: string
@@ -52,15 +52,6 @@ const parseDateRange = (range: string): DateRange => {
   }
 }
 
-type RawPoint = {
-  time: string
-  open: number | null
-  high: number | null
-  low: number | null
-  close: number | null
-  volume: number
-}
-
 type Point = {
   time: string
   open: number
@@ -68,10 +59,6 @@ type Point = {
   low: number
   close: number
   volume: number
-}
-
-function isCompletePoint(p: RawPoint): p is Point {
-  return p.open !== null && p.high !== null && p.low !== null && p.close !== null
 }
 
 // Calculate moving average
@@ -119,11 +106,11 @@ export default async function handler(
     const dateRange = parseDateRange(range as string)
     console.log(`[API] Parsed date range:`, dateRange)
 
-    // Use yahoo-finance2 with simpler configuration
-    const queryOptions: HistoricalOptions = {
+    // Use yahoo-finance2 with basic configuration
+    const queryOptions = {
       period1: new Date(dateRange.start),
       period2: new Date(dateRange.end),
-      interval: '1d'
+      interval: '1d' as const
     }
 
     console.log(`[API] Yahoo Finance options:`, queryOptions)
@@ -141,16 +128,22 @@ export default async function handler(
     }
 
     // Transform and filter data
-    const rawData: RawPoint[] = historicalData.map(row => ({
-      time: row.date.toISOString().split('T')[0],
-      open: typeof row.open === 'number' ? row.open : null,
-      high: typeof row.high === 'number' ? row.high : null,
-      low: typeof row.low === 'number' ? row.low : null,
-      close: typeof row.close === 'number' ? row.close : null,
-      volume: typeof row.volume === 'number' ? row.volume : 0,
-    }))
+    const chartData: Point[] = historicalData
+      .map(row => ({
+        time: row.date.toISOString().split('T')[0],
+        open: row.open,
+        high: row.high,
+        low: row.low,
+        close: row.close,
+        volume: row.volume || 0,
+      }))
+      .filter(row => 
+        typeof row.open === 'number' && 
+        typeof row.high === 'number' && 
+        typeof row.low === 'number' && 
+        typeof row.close === 'number'
+      )
 
-    const chartData = rawData.filter(isCompletePoint)
     console.log(`[API] Filtered to ${chartData.length} complete data points`)
 
     if (chartData.length === 0) {
@@ -158,7 +151,7 @@ export default async function handler(
         message: `No valid OHLC data for symbol ${symbol}`,
         symbol,
         dateRange,
-        rawDataLength: rawData.length 
+        rawDataLength: historicalData.length 
       })
     }
 
