@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import yahooFinance from 'yahoo-finance2'
+import yahooFinance, { type HistoricalOptions } from 'yahoo-finance2'
 
 type DateRange = {
   start: string
@@ -76,7 +76,7 @@ function isCompletePoint(p: RawPoint): p is Point {
 }
 
 const fetchYahooHistorical = async (symbol: string, start: string, end: string): Promise<Point[]> => {
-  const options: yahooFinance.HistoricalOptions = {
+  const options: HistoricalOptions = {
     period1: new Date(start),
     period2: new Date(end),
     interval: '1d'
