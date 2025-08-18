@@ -1,5 +1,5 @@
-import { useQuery, UseQueryResult } from 'react-query'
-import axios, { AxiosError } from 'axios'
+import { useQuery } from 'react-query'
+import axios from 'axios'
 
 interface StockData {
   symbol: string
@@ -55,7 +55,7 @@ interface UseStockDataResult {
 const fetchStockData = async (symbol: string, range: string): Promise<StockData> => {
   try {
     const { data } = await axios.get(`/api/stock-data?symbol=${symbol}&range=${range}`, {
-      timeout: 10000, // 10 second timeout
+      timeout: 10000,
     })
     return data
   } catch (error) {
@@ -95,13 +95,15 @@ export const useStockData = (
     return { data: null, isLoading: true, error: null }
   }
 
-  // Handle errors
-  const error = query1.error || query2.error
-  if (error) {
+  const firstError = query1.error
+  const secondError = query2.error
+  
+  if (firstError || secondError) {
+    const errorToUse = firstError || secondError
     return { 
       data: null, 
       isLoading: false, 
-      error: error instanceof Error ? error : new Error('Failed to fetch data')
+      error: errorToUse || new Error('Failed to fetch data')
     }
   }
 
@@ -113,7 +115,6 @@ export const useStockData = (
     }
   }
 
-  // Calculate metrics
   const returns1 = query1.data.data.ohlc.map(d => d.close)
   const returns2 = query2.data.data.ohlc.map(d => d.close)
   
@@ -129,7 +130,7 @@ export const useStockData = (
   const correlation = calculateCorrelation(dailyReturns1, dailyReturns2)
   const beta = calculateBeta(dailyReturns1, dailyReturns2)
   
-  const riskFreeRate = 0.02 // Assume 2% risk-free rate
+  const riskFreeRate = 0.02
   const sharpeRatio1 = ((totalReturn1 / 100) - riskFreeRate) / (volatility1 / 100)
   const sharpeRatio2 = ((totalReturn2 / 100) - riskFreeRate) / (volatility2 / 100)
 
@@ -153,7 +154,6 @@ export const useStockData = (
   }
 }
 
-// Helper functions
 function calculateStandardDeviation(values: number[]): number {
   const n = values.length
   if (n < 2) return 0
