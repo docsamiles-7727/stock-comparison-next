@@ -22,6 +22,13 @@ export default function Home() {
 
   const { data: stockData, isLoading, error } = useStockData(ticker1, ticker2, dateRange)
 
+  // Helper function to get error message
+  const getErrorMessage = (error: unknown): string => {
+    if (error instanceof Error) return error.message
+    if (typeof error === 'string') return error
+    return 'An unexpected error occurred'
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <Head>
@@ -58,7 +65,7 @@ export default function Home() {
 
         {error && (
           <div className="bg-red-50 dark:bg-red-900 p-4 rounded-lg mb-8">
-            <p className="text-red-700 dark:text-red-100">{error}</p>
+            <p className="text-red-700 dark:text-red-100">{getErrorMessage(error)}</p>
           </div>
         )}
 
@@ -66,7 +73,7 @@ export default function Home() {
           <div className="flex justify-center items-center h-96">
             <div className="animate-spin rounded-full h-32 w-32 border-b-2 border-primary-500"></div>
           </div>
-        ) : (
+        ) : stockData ? (
           <>
             <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg p-4 mb-8">
               <StockChart
@@ -80,7 +87,7 @@ export default function Home() {
               <PerformanceMetrics data={stockData} />
             </div>
           </>
-        )}
+        ) : null}
       </main>
 
       <footer className="border-t border-gray-200 dark:border-gray-700 mt-12 py-6">
