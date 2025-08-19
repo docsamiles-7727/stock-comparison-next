@@ -37,6 +37,72 @@ interface UseStockDataResult {
   data: {
     ticker1: string
     ticker2: string
+    chartData: {
+      ticker1: {
+        ohlc: Array<{
+          time: string
+          open: number
+          high: number
+          low: number
+          close: number
+          volume: number
+        }>
+        ma50: Array<{
+          time: string
+          value: number
+        }>
+        ma200: Array<{
+          time: string
+          value: number
+        }>
+        volume: Array<{
+          time: string
+          value: number
+          color: string
+        }>
+      }
+      ticker2: {
+        ohlc: Array<{
+          time: string
+          open: number
+          high: number
+          low: number
+          close: number
+          volume: number
+        }>
+        ma50: Array<{
+          time: string
+          value: number
+        }>
+        ma200: Array<{
+          time: string
+          value: number
+        }>
+        volume: Array<{
+          time: string
+          value: number
+          color: string
+        }>
+      }
+    }
+    differenceData: {
+      difference: Array<{
+        time: string
+        value: number
+      }>
+      normalizedSeries1: Array<{
+        time: string
+        value: number
+      }>
+      normalizedSeries2: Array<{
+        time: string
+        value: number
+      }>
+      correlation: number
+      timeShift: number
+      ticker1: string
+      ticker2: string
+    }
     metrics: {
       totalReturn1: number
       totalReturn2: number
@@ -134,10 +200,23 @@ export const useStockData = (
   const sharpeRatio1 = ((totalReturn1 / 100) - riskFreeRate) / (volatility1 / 100)
   const sharpeRatio2 = ((totalReturn2 / 100) - riskFreeRate) / (volatility2 / 100)
 
+  // Calculate normalized differences for comparison
+  const normalizedDifference = calculateNormalizedDifference(
+    query1.data.data.ohlc,
+    query2.data.data.ohlc,
+    ticker1,
+    ticker2
+  )
+
   return {
     data: {
       ticker1,
       ticker2,
+      chartData: {
+        ticker1: query1.data.data,
+        ticker2: query2.data.data,
+      },
+      differenceData: normalizedDifference,
       metrics: {
         totalReturn1,
         totalReturn2,
@@ -202,4 +281,71 @@ function calculateVariance(x: number[]): number {
   const mean = x.reduce((a, b) => a + b) / n
   return x.reduce((acc, val) => 
     acc + Math.pow(val - mean, 2), 0) / (n - 1)
+}
+
+function calculateNormalizedDifference(
+  data1: Array<{time: string, close: number}>,
+  data2: Array<{time: string, close: number}>,
+  ticker1: string,
+  ticker2: string
+) {
+  // Find common date range
+  const dates1 = new Set(data1.map(d => d.time))
+  const dates2 = new Set(data2.map(d => d.time))
+  const commonDates = Array.from(dates1).filter(date => dates2.has(date)).sort()
+  
+  if (commonDates.length === 0) {
+    return {
+      difference: [],
+      normalizedSeries1: [],
+      normalizedSeries2: [],
+      correlation: 0,
+      timeShift: 0,
+      ticker1,
+      ticker2
+    }
+  }
+  
+  // Get data for common dates
+  const series1 = commonDates.map(date => {
+    const point = data1.find(d => d.time === date)
+    return { time: date, value: point?.close || 0 }
+  })
+  
+  const series2 = commonDates.map(date => {
+    const point = data2.find(d => d.time === date)
+    return { time: date, value: point?.close || 0 }
+  })
+  
+  // Normalize to percentage change from first value
+  const normalizedSeries1 = series1.map((point, i) => ({
+    time: point.time,
+    value: i === 0 ? 0 : ((point.value - series1[0].value) / series1[0].value) * 100
+  }))
+  
+  const normalizedSeries2 = series2.map((point, i) => ({
+    time: point.time,
+    value: i === 0 ? 0 : ((point.value - series2[0].value) / series2[0].value) * 100
+  }))
+  
+  // Calculate difference (series1 - series2)
+  const difference = normalizedSeries1.map((point, i) => ({
+    time: point.time,
+    value: point.value - normalizedSeries2[i].value
+  }))
+  
+  // Calculate correlation between normalized series
+  const values1 = normalizedSeries1.map(d => d.value)
+  const values2 = normalizedSeries2.map(d => d.value)
+  const correlation = calculateCorrelation(values1, values2)
+  
+  return {
+    difference,
+    normalizedSeries1,
+    normalizedSeries2,
+    correlation,
+    timeShift: 0, // Will be used for time-shifting functionality
+    ticker1,
+    ticker2
+  }
 }

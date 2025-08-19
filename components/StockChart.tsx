@@ -45,7 +45,7 @@ const StockChart = ({ data, options, className }: StockChartProps) => {
     })
 
     // Add volume series if enabled
-    if (options.showVolume) {
+    if (options.showVolume && data.volume) {
       const volumeSeries = chart.addHistogramSeries({
         color: '#26a69a50',
         priceFormat: {
@@ -59,16 +59,19 @@ const StockChart = ({ data, options, className }: StockChartProps) => {
     // Add moving averages if enabled
     if (options.showMA) {
       options.maPeriods.forEach((period, index) => {
-        const maSeries = chart.addLineSeries({
-          color: index === 0 ? '#2962FF' : '#FF6D00',
-          lineWidth: 2,
-        })
-        maSeries.setData(data[`ma${period}`])
+        const maData = data[`ma${period}`]
+        if (maData) {
+          const maSeries = chart.addLineSeries({
+            color: index === 0 ? '#2962FF' : '#FF6D00',
+            lineWidth: 2,
+          })
+          maSeries.setData(maData)
+        }
       })
     }
 
     // Add Bollinger Bands if enabled
-    if (options.showBollinger) {
+    if (options.showBollinger && data.bollingerUpper && data.bollingerLower) {
       const upperBandSeries = chart.addLineSeries({
         color: '#2962FF50',
         lineWidth: 1,
@@ -82,7 +85,9 @@ const StockChart = ({ data, options, className }: StockChartProps) => {
     }
 
     // Set main series data
-    mainSeries.setData(data.ohlc)
+    if (data.ohlc) {
+      mainSeries.setData(data.ohlc)
+    }
 
     // Fit content and add margin
     chart.timeScale().fitContent()

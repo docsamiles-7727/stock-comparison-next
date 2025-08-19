@@ -30,6 +30,11 @@ const parseDateRange = (range: string): DateRange => {
         start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
         end: now.toISOString().split('T')[0] 
       }
+    case '2y':
+      return { 
+        start: new Date(now.getTime() - 2 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
+        end: now.toISOString().split('T')[0] 
+      }
     case '3y':
       return { 
         start: new Date(now.getTime() - 3 * 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
@@ -43,7 +48,16 @@ const parseDateRange = (range: string): DateRange => {
     default:
       if (range.includes('|')) {
         const [start, end] = range.split('|')
-        return { start, end }
+        // Handle special 'now' keyword for end date
+        const endDate = end === 'now' ? now.toISOString().split('T')[0] : end
+        // Validate start date format and handle period shortcuts
+        let startDate = start
+        if (['1m', '3m', '6m', '1y', '2y', '3y', '5y'].includes(start)) {
+          // Recursively parse the start period
+          const parsed = parseDateRange(start)
+          startDate = parsed.start
+        }
+        return { start: startDate, end: endDate }
       }
       return { 
         start: new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000).toISOString().split('T')[0], 
@@ -106,10 +120,33 @@ export default async function handler(
     const dateRange = parseDateRange(range as string)
     console.log(`[API] Parsed date range:`, dateRange)
 
+    // Validate date range
+    const startDate = new Date(dateRange.start)
+    const endDate = new Date(dateRange.end)
+    
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      console.error(`[API] Invalid date range for ${symbol}:`, dateRange)
+      return res.status(400).json({ 
+        message: 'Invalid date range provided',
+        symbol,
+        dateRange,
+        error: 'Start or end date is invalid'
+      })
+    }
+
+    if (startDate >= endDate) {
+      console.error(`[API] Start date must be before end date for ${symbol}:`, dateRange)
+      return res.status(400).json({ 
+        message: 'Start date must be before end date',
+        symbol,
+        dateRange
+      })
+    }
+
     // Use yahoo-finance2 with basic configuration
     const queryOptions = {
-      period1: new Date(dateRange.start),
-      period2: new Date(dateRange.end),
+      period1: startDate,
+      period2: endDate,
       interval: '1d' as const
     }
 
@@ -181,12 +218,43 @@ export default async function handler(
   } catch (error) {
     console.error(`[API] Error fetching data for ${symbol}:`, error)
     
+    // Handle specific Yahoo Finance errors
+    if (error instanceof Error) {
+      if (error.message.includes('400') || error.message.includes('Bad Request')) {
+        return res.status(400).json({
+          message: `Invalid request for symbol ${symbol}`,
+          details: 'The symbol may not exist or the date range may be invalid',
+          symbol,
+          range,
+          originalError: error.message
+        })
+      }
+      
+      if (error.message.includes('404') || error.message.includes('Not Found')) {
+        return res.status(404).json({
+          message: `Symbol ${symbol} not found`,
+          details: 'The requested stock symbol does not exist',
+          symbol,
+          range
+        })
+      }
+      
+      if (error.message.includes('timeout') || error.message.includes('ETIMEDOUT')) {
+        return res.status(504).json({
+          message: 'Request timeout',
+          details: 'The request to fetch stock data timed out',
+          symbol,
+          range
+        })
+      }
+    }
+    
     const errorResponse = {
       message: 'Error fetching stock data',
       details: error instanceof Error ? error.message : 'Unknown error',
       symbol,
       range,
-      stack: error instanceof Error ? error.stack : undefined
+      stack: process.env.NODE_ENV === 'development' ? (error instanceof Error ? error.stack : undefined) : undefined
     }
     
     res.status(500).json(errorResponse)
